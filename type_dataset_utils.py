@@ -230,15 +230,15 @@ def generate_qa_pairs(examples, num_questions_per_pokemon: int = QUESTIONS_PER_P
 
 
 def TypeDataset() -> Dataset:
-    return  Dataset.from_generator(dataset_gen)
+    return Dataset.from_generator(dataset_gen)
 
-def TypeSentenceDataset(type_dataset: Dataset, num_sentences_per_pokemon=TYPE_SENTENCES_PER_POKEMON) -> Dataset:
+def TypeSentenceDataset(type_dataset: Dataset, num_type_sentences_per_pokemon=TYPE_SENTENCES_PER_POKEMON) -> Dataset:
     return type_dataset.map(
         generate_type_sentences,
         batched=True,
         batch_size=100,
         remove_columns=['pokemon', 'types'],
-        fn_kwargs={'num_sentences_per_pokemon': num_sentences_per_pokemon}
+        fn_kwargs={'num_type_sentences_per_pokemon': num_type_sentences_per_pokemon}
     )
 
 def TypeQADataset(type_dataset: Dataset, num_questions_per_pokemon=QUESTIONS_PER_POKEMON) -> Dataset:
@@ -257,7 +257,8 @@ if __name__ == '__main__':
     print(pokemon_to_question_answers('Bulbasaur', ['Grass', 'Poison']))
 
 
-    type_dataset = Dataset.from_generator(dataset_gen)
+    #type_dataset = Dataset.from_generator(dataset_gen)
+    type_dataset = TypeDataset()
 
     print(len(type_dataset))
     print(type_dataset[0])
@@ -270,7 +271,6 @@ if __name__ == '__main__':
     qa_pair_dataset = type_dataset.map(generate_qa_pairs, batched=True, batch_size=100, remove_columns=['pokemon'])
     print(len(qa_pair_dataset))
     print(qa_pair_dataset[6])
-
 
     qa_pair_dataset_big = TypeQADataset(type_dataset, 16)
     print(len(qa_pair_dataset_big[0]['questions']))

@@ -6,8 +6,9 @@ import numpy as np
 
 from trl import SFTTrainer
 from transformers import PreTrainedTokenizer, PreTrainedModel
-from transformers.trainer_utils import EvalPrediction
 from datasets import Dataset
+
+from unsloth import FastLanguageModel
 
 from typing import List, Dict, Any, Tuple
 
@@ -39,13 +40,11 @@ TYPES = [
     'water'
 ]
 
-def single_pokemon_qa(model: PreTrainedModel, tokenizer: PreTrainedTokenizer, questions: List[str], types: List[str]) -> int:
-    """Runs inference with model (using the tokenizer for the appropriate prompt template) and returns the number
-    of questions that the model got right."""
+def qa_pipeline(model, tokenizer: PreTrainedTokenizer, questions):
+    padding_side = tokenizer.padding_side
+    tokenizer.padding_side = 'left' # regardless of what it is like in training, we need to pad left for evals
 
-    question_batch = []
-    for question in questions:
-        question_batch.append([{'role': 'user', 'content': question}])
+    question_batch = [[{'role': 'user', 'content': q}] for q in questions]
 
     inputs = tokenizer.apply_chat_template(
         question_batch,
@@ -53,11 +52,23 @@ def single_pokemon_qa(model: PreTrainedModel, tokenizer: PreTrainedTokenizer, qu
         tokenize=False,
     )
 
-    inputs = tokenizer(inputs, padding='longest', return_tensors='pt').to('cuda')
+    # the special tokens are already added when the chat template is applied
+    inputs = tokenizer(inputs, padding='longest', return_tensors='pt', add_special_tokens=False).to('cuda')
 
     outputs = model.generate(**inputs, max_new_tokens=32, use_cache=True, temperature=0.0)
 
-    text_batch = tokenizer.batch_decode(outputs)
+    text_batch = tokenizer.batch_decode(outputs, skip_special_tokens=True)
+
+    tokenizer.padding_side = padding_side
+
+    return text_batch
+
+
+def single_pokemon_qa(model: PreTrainedModel, tokenizer: PreTrainedTokenizer, questions: List[str], types: List[str]) -> int:
+    """Runs inference with model (using the tokenizer for the appropriate prompt template) and returns the number
+    of questions that the model got right."""
+
+    text_batch = qa_pipeline(model, tokenizer, questions)
 
     num_correct = 0
 
@@ -79,17 +90,7 @@ def batch_pokemon_qa(model: PreTrainedModel, tokenizer: PreTrainedTokenizer, que
         flattened_questions.extend(pokemon_questions)
         question_indices.extend([i] * len(pokemon_questions))
 
-    question_batch = [[{'role': 'user', 'content': q}] for q in flattened_questions]
-
-    # apply_chat_template can't create an attention mask, so I have to go from messages -> string w/ template -> tokens + attention mask
-    inputs = tokenizer.apply_chat_template(
-        question_batch, add_generation_prompt=True, tokenize=False
-    )
-    inputs = tokenizer(inputs, padding='longest', return_tensors='pt').to('cuda')
-
-    # I want temp=0 to keep things deterministic, but it won't reveal the true knowledge of the model (generating n outputs then voting would help, but be more expensive)
-    outputs = model.generate(**inputs, max_new_tokens=32, use_cache=True, temperature=0.0)
-    text_batch = tokenizer.batch_decode(outputs)
+    text_batch = qa_pipeline(model, tokenizer, flattened_questions)
 
     # Count correct answers for each Pokémon
     num_correct = [0] * len(questions)
@@ -184,6 +185,9 @@ if __name__ == '__main__':
         dtype=None,
         load_in_4bit=False
     )
+
+    print(qa_pipeline(model, tokenizer, ['What type of pokemon is Bulbasaur?', "bulbasaur's pokedex entry shows it as what type?",
+                                         "What type or types does bulbasaur have?"]))
 
     num_correct = single_pokemon_qa(model, tokenizer, ['What type of pokemon is Bulbasaur?', "bulbasaur's pokedex entry shows it as what type?",
                                          "What type or types does bulbasaur have?"], types=['Grass', 'Poison'])
